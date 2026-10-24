@@ -32,7 +32,7 @@ anyhow = "1.0.95"
 hound = "3.5.1"
 log = "0.4.25"
 env_filter = "0.1.0"
-tokio = "1.43.0"
+tokio = { version = "1.43.0", features = ["rt-multi-thread", "macros", "net", "signal"] }
 earshot = "1.2.2"
 # Feedback sounds. No `recording`: microphone capture is handy-recorder's.
 reqwest = { version = "0.12", features = ["json", "stream", "gzip", "brotli", "deflate"] }
@@ -60,6 +60,10 @@ specta = { version = "=2.0.0-rc.22", features = ["derive"] }
 hf-hub = { git = "https://github.com/cjpais/hf-hub", branch = "cancellable-downloads", features = [
   "tokio",
 ] }
+axum = { version = "0.8.9", features = ["multipart"] }
+symphonia = { version = "0.6.1", features = ["all"] }
+rubato = "5.0.1"
+audioadapter-buffers = "5.2.0"
 
 [target.'cfg(unix)'.dependencies]
 signal-hook = "0.3"

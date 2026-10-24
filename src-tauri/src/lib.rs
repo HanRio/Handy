@@ -6,6 +6,7 @@ pub mod host;
 mod managers;
 mod memory;
 pub mod portable;
+pub mod server;
 pub mod settings;
 pub mod utils;
 
