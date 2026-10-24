@@ -32,31 +32,6 @@ impl ChineseVariety {
     }
 }
 
-/// The script a locale writes Chinese in, or `None` for non-Chinese locales.
-///
-/// `zh` defaults to Simplified unless tagged Hant or regioned to Taiwan, Hong
-/// Kong or Macau; Cantonese (`yue`) defaults to Traditional unless tagged Hans.
-pub fn chinese_script_for_locale(locale: &str) -> Option<ChineseScript> {
-    let normalized = locale.to_lowercase().replace('_', "-");
-    let subtags: Vec<_> = normalized.split('-').collect();
-    let is_hant = subtags.contains(&"hant");
-    let is_hans = subtags.contains(&"hans");
-    let is_traditional_region = ["tw", "hk", "mo"]
-        .iter()
-        .any(|region| subtags.contains(region));
-
-    let traditional = match subtags.first().copied() {
-        Some("zh") => is_hant || (!is_hans && is_traditional_region),
-        Some("yue") => !is_hans,
-        _ => return None,
-    };
-    Some(if traditional {
-        ChineseScript::Traditional
-    } else {
-        ChineseScript::Simplified
-    })
-}
-
 /// The OpenCC converter for a variety/script pair, built on first use and
 /// reused after. Building one parses its dictionaries, which is too slow to
 /// repeat on every live-preview update. A failed build is cached as `None`.

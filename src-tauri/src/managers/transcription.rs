@@ -5,7 +5,7 @@ use crate::audio_toolkit::{
 };
 use crate::chinese_script::{convert_chinese_script, ChineseVariety};
 use crate::engine_supervisor::{
-    CancelMark, DeviceInfo, DeviceSelector, EngineError, EngineSupervisor, LoadSpec, LoadedInfo,
+    CancelMark, DeviceSelector, EngineError, EngineSupervisor, LoadSpec, LoadedInfo,
     Unloading,
 };
 use crate::managers::model::ModelManager;
@@ -1681,58 +1681,6 @@ fn drain_until_finalize(rx: mpsc::Receiver<StreamCmd>) {
     }
 }
 
-/// Log the compute devices transcribe-cpp registers.
-///
-/// Devices are listed by a transcription worker process (see
-/// [`crate::engine_supervisor`]), so GPU driver initialization never runs in
-/// the app process. Listing opens the GPU, which on macOS loads ggml's Metal
-/// library and compiles it when the system shader cache does not hold it yet
-/// (the first launch after an install or update), so the app calls this from
-/// a background thread instead of its startup path.
-pub fn report_compute_devices(tm: &TranscriptionManager) {
-    if transcribe_gpu_disabled_for_host() {
-        warn!(
-            "Windows x64 build is running under emulation on an ARM64 host; \
-             disabling transcribe.cpp GPU acceleration and using CPU"
-        );
-    }
-    match transcribe_compute_devices(&tm.engine) {
-        Ok(devices) => info!(
-            "transcribe-cpp initialized with {} compute device(s): [{}]",
-            devices.len(),
-            devices
-                .iter()
-                .map(|d| format!("{} ({})", d.name, d.kind))
-                .collect::<Vec<_>>()
-                .join(", ")
-        ),
-        Err(e) => warn!("transcribe-cpp compute devices are unavailable: {}", e),
-    }
-}
-
-/// Human-readable list of the transcribe-cpp compute devices, for the
-/// `--list-devices` flag. The reported `index` is the value to pass to
-/// `--device-index`. Errors if the devices could not be listed.
-pub fn describe_compute_devices(tm: &TranscriptionManager) -> Result<Vec<String>> {
-    Ok(transcribe_compute_devices(&tm.engine)?
-        .into_iter()
-        .map(|d| {
-            let idx = d
-                .index
-                .map(|i| i.to_string())
-                .unwrap_or_else(|| "-".to_string());
-            let vram_mb = d.memory_total / (1024 * 1024);
-            format!(
-                "index={} kind={} name={} vram={}MB",
-                idx,
-                d.kind,
-                d.label(),
-                vram_mb
-            )
-        })
-        .collect())
-}
-
 /// Map Handy's whisper accelerator setting to a transcribe-cpp [`Backend`].
 ///
 /// `Auto` lets the library pick the best device (with CPU fallback), while
@@ -1769,13 +1717,6 @@ fn resolve_gpu_device(
     gpu_device.map(str::to_string)
 }
 
-#[derive(Serialize, Clone, Debug, Type)]
-pub struct GpuDeviceOption {
-    pub id: String,
-    pub name: String,
-    pub total_vram_mb: usize,
-}
-
 fn transcribe_gpu_disabled_for_host() -> bool {
     crate::utils::is_windows_x64_emulated_on_arm64()
 }
@@ -1791,108 +1732,12 @@ fn effective_transcribe_accelerator(
     }
 }
 
-/// The compute devices the latest worker listed. On a host without GPU
-/// access every worker is CPU-only, so it lists no GPU.
-fn transcribe_compute_devices(engine: &EngineSupervisor) -> Result<Vec<DeviceInfo>> {
-    engine
-        .devices()
-        .ok_or_else(|| anyhow::anyhow!("compute devices could not be listed (see the log for why)"))
-}
-
-fn available_transcribe_accelerators(gpu_disabled: bool) -> Vec<String> {
-    if gpu_disabled {
-        vec!["cpu".to_string()]
-    } else {
-        vec!["auto".to_string(), "cpu".to_string(), "gpu".to_string()]
-    }
-}
-
-fn gpu_device_options(engine: &EngineSupervisor) -> Vec<GpuDeviceOption> {
-    // GPU compute devices as the latest worker listed them, so a GPU that
-    // comes back is picked up. `id` is a persistent identity key, never the
-    // process-local registry index. It uses the backend's device_id where
-    // available and its name otherwise (Metal). `total_vram_mb` is 0 when the
-    // backend does not report capacity. Empty if listing failed.
-    transcribe_compute_devices(engine)
-        .unwrap_or_default()
-        .into_iter()
-        .filter(DeviceInfo::is_gpu)
-        .map(|d| GpuDeviceOption {
-            id: d.key.clone(),
-            name: d.label().to_string(),
-            total_vram_mb: (d.memory_total / (1024 * 1024)) as usize,
-        })
-        .collect()
-}
-
-#[derive(Serialize, Clone, Debug, Type)]
-pub struct AvailableAccelerators {
-    pub transcribe: Vec<String>,
-    pub gpu_devices: Vec<GpuDeviceOption>,
-}
-
-/// Return the accelerators available to this process on its current host.
-pub fn get_available_accelerators(tm: &TranscriptionManager) -> AvailableAccelerators {
-    let transcribe_options = available_transcribe_accelerators(transcribe_gpu_disabled_for_host());
-
-    AvailableAccelerators {
-        transcribe: transcribe_options,
-        gpu_devices: gpu_device_options(&tm.engine),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn languages(codes: &[&str]) -> Vec<String> {
         codes.iter().map(|code| (*code).to_string()).collect()
-    }
-
-    #[test]
-    fn normal_hosts_preserve_every_transcribe_accelerator_setting() {
-        for setting in [
-            TranscribeAcceleratorSetting::Auto,
-            TranscribeAcceleratorSetting::Cpu,
-            TranscribeAcceleratorSetting::Gpu,
-        ] {
-            assert_eq!(effective_transcribe_accelerator(setting, false), setting);
-        }
-        assert_eq!(
-            available_transcribe_accelerators(false),
-            ["auto", "cpu", "gpu"]
-        );
-        assert_eq!(
-            select_transcribe_backend_for_host(TranscribeAcceleratorSetting::Auto, false),
-            Backend::Auto
-        );
-        assert_eq!(
-            select_transcribe_backend_for_host(TranscribeAcceleratorSetting::Cpu, false),
-            Backend::Cpu
-        );
-        assert_eq!(
-            select_transcribe_backend_for_host(TranscribeAcceleratorSetting::Gpu, false),
-            Backend::Auto
-        );
-    }
-
-    #[test]
-    fn emulated_x64_on_arm64_forces_every_transcribe_setting_to_cpu() {
-        for setting in [
-            TranscribeAcceleratorSetting::Auto,
-            TranscribeAcceleratorSetting::Cpu,
-            TranscribeAcceleratorSetting::Gpu,
-        ] {
-            assert_eq!(
-                effective_transcribe_accelerator(setting, true),
-                TranscribeAcceleratorSetting::Cpu
-            );
-            assert_eq!(
-                select_transcribe_backend_for_host(setting, true),
-                Backend::Cpu
-            );
-        }
-        assert_eq!(available_transcribe_accelerators(true), ["cpu"]);
     }
 
     #[test]
