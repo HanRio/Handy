@@ -84,6 +84,7 @@ impl<'a> LiveSession<'a> {
             LiveDecoder::Chunked(chunks) => finish_chunks(*chunks, recorded_samples)?,
         };
         Ok(decoded.map(|(text, model_detected_language)| RunOutcome {
+            segments: Vec::new(),
             setup: self.setup,
             text,
             model_detected_language,

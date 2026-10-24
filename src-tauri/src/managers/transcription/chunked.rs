@@ -22,6 +22,8 @@ pub(super) struct ChunkedDecode<'a> {
     model_id: String,
     chunker: Chunker,
     transcripts: Vec<Transcript>,
+    /// Samples of the chunks decoded so far, to offset segment timestamps.
+    decoded_samples: usize,
     /// The first run that failed or was cancelled; nothing more is decoded
     /// after it.
     failure: Option<EngineError>,
@@ -44,6 +46,7 @@ impl<'a> ChunkedDecode<'a> {
             model_id: model_id.to_string(),
             chunker: Chunker::new(Box::new(move || create_detector(backend, &app_handle))),
             transcripts: Vec::new(),
+            decoded_samples: 0,
             failure: None,
         }
     }
@@ -112,13 +115,22 @@ impl<'a> ChunkedDecode<'a> {
             if self.failure.is_some() {
                 return;
             }
-            let audio_secs = chunk.len() as f64 / 16_000.0;
+            let chunk_len = chunk.len();
+            let audio_secs = chunk_len as f64 / 16_000.0;
             let started = Instant::now();
             match self
                 .tm
                 .run_batch(self.mark, chunk, &self.run_options, &self.model_id)
             {
-                Ok(transcript) => {
+                Ok(mut transcript) => {
+                    // Chunks are contiguous, so the audio decoded so far is
+                    // this chunk's start within the clip.
+                    let offset_ms = (self.decoded_samples as i64 * 1000) / 16_000;
+                    for segment in &mut transcript.segments {
+                        segment.t0_ms += offset_ms;
+                        segment.t1_ms += offset_ms;
+                    }
+                    self.decoded_samples += chunk_len;
                     self.transcripts.push(transcript);
                     // Real-time factor: audio seconds decoded per second of
                     // wall clock. Floored so a near-instant decode reports a

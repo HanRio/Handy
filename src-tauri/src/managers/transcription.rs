@@ -230,6 +230,20 @@ impl Drop for StreamWorkerGuard {
     }
 }
 
+/// One timed piece of a transcript, in milliseconds from the clip start.
+#[derive(Clone, Debug, Serialize)]
+pub struct TimedSegment {
+    pub start_ms: i64,
+    pub end_ms: i64,
+    pub text: String,
+}
+
+#[derive(Clone, Debug, Default, Serialize)]
+pub struct TimedTranscript {
+    pub text: String,
+    pub segments: Vec<TimedSegment>,
+}
+
 #[derive(Clone)]
 pub struct TranscriptionManager {
     /// The transcribe-cpp engine: owns the worker process, its model, and
@@ -895,6 +909,20 @@ impl TranscriptionManager {
         audio: Vec<f32>,
         live: Option<RunOutcome>,
     ) -> Result<String> {
+        self.complete_timed(started, audio, live).map(|t| t.text)
+    }
+
+    /// Transcribe a whole clip in batch, keeping segment timestamps.
+    pub fn transcribe_timed(&self, audio: Vec<f32>) -> Result<TimedTranscript> {
+        self.complete_timed(Instant::now(), audio, None)
+    }
+
+    fn complete_timed(
+        &self,
+        started: Instant,
+        audio: Vec<f32>,
+        live: Option<RunOutcome>,
+    ) -> Result<TimedTranscript> {
         #[cfg(debug_assertions)]
         if std::env::var("HANDY_FORCE_TRANSCRIPTION_FAILURE").is_ok() {
             return Err(anyhow::anyhow!(
@@ -907,7 +935,7 @@ impl TranscriptionManager {
         if audio.is_empty() {
             debug!("Empty audio vector");
             self.maybe_unload_immediately("empty audio");
-            return Ok(String::new());
+            return Ok(TimedTranscript::default());
         }
 
         let outcome = match live {
@@ -915,6 +943,7 @@ impl TranscriptionManager {
             None => self.decode_batch(audio)?,
         };
         let settings = get_settings(&self.app_handle);
+        let segments = outcome.segments.clone();
         let final_result = finish_text(outcome, &settings);
 
         let translation_note = if settings.translate_to_english {
@@ -944,7 +973,10 @@ impl TranscriptionManager {
 
         self.maybe_unload_immediately("transcription");
 
-        Ok(final_result)
+        Ok(TimedTranscript {
+            text: final_result,
+            segments,
+        })
     }
 
     /// Decode a whole clip with the loaded model, loading it first if a load
@@ -1041,10 +1073,21 @@ impl TranscriptionManager {
             .map_err(engine_error)?,
             BatchDecode::Whole => vec![whole(audio)?],
         };
+        let segments = transcripts
+            .iter()
+            .flat_map(|t| t.segments.iter())
+            .map(|s| TimedSegment {
+                start_ms: s.t0_ms,
+                end_ms: s.t1_ms,
+                text: s.text.trim().to_string(),
+            })
+            .filter(|s| !s.text.is_empty())
+            .collect();
         let (text, model_detected_language) = join_chunks(transcripts);
         Ok(RunOutcome {
             setup,
             text,
+            segments,
             model_detected_language,
         })
     }
@@ -1075,6 +1118,7 @@ impl TranscriptionManager {
 struct RunOutcome {
     setup: RunSetup,
     text: String,
+    segments: Vec<TimedSegment>,
     /// The language the model itself detected, if it reported one.
     model_detected_language: Option<String>,
 }
@@ -1086,6 +1130,7 @@ fn finish_text(outcome: RunOutcome, settings: &AppSettings) -> String {
         setup,
         text,
         model_detected_language,
+        ..
     } = outcome;
     let output_language = setup.output_language(settings, model_detected_language);
     debug!("Output language evidence: {:?}", output_language);
