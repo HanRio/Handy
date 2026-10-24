@@ -6,7 +6,6 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
-use tauri::Manager;
 
 static PORTABLE_DATA_DIR: OnceLock<Option<PathBuf>> = OnceLock::new();
 static PREVIOUS_HF_HOME: OnceLock<Option<PathBuf>> = OnceLock::new();
@@ -80,39 +79,9 @@ pub fn data_dir() -> Option<&'static PathBuf> {
     PORTABLE_DATA_DIR.get().and_then(|v| v.as_ref())
 }
 
-/// Portable-aware replacement for `app.path().app_data_dir()`.
-pub fn app_data_dir(app: &tauri::AppHandle) -> Result<PathBuf, tauri::Error> {
-    if let Some(dir) = data_dir() {
-        Ok(dir.clone())
-    } else {
-        app.path().app_data_dir()
-    }
-}
-
-/// Portable-aware replacement for `app.path().app_log_dir()`.
-pub fn app_log_dir(app: &tauri::AppHandle) -> Result<PathBuf, tauri::Error> {
-    if let Some(dir) = data_dir() {
-        Ok(dir.join("logs"))
-    } else {
-        app.path().app_log_dir()
-    }
-}
-
-/// Resolve a relative path against the app data directory (portable-aware).
-/// Replaces `app.path().resolve(path, BaseDirectory::AppData)`.
-pub fn resolve_app_data(app: &tauri::AppHandle, relative: &str) -> Result<PathBuf, tauri::Error> {
-    Ok(app_data_dir(app)?.join(relative))
-}
-
-/// Get the path to use with `tauri-plugin-store`.
-/// Returns an absolute path in portable mode (so the store plugin writes to
-/// the portable Data dir) or the original relative path otherwise.
-pub fn store_path(relative: &str) -> PathBuf {
-    if let Some(dir) = data_dir() {
-        dir.join(relative)
-    } else {
-        PathBuf::from(relative)
-    }
+/// Data directory: portable `Data/` if active, else the AppHandle's.
+pub fn app_data_dir(app: &crate::host::AppHandle) -> Result<PathBuf, std::io::Error> {
+    Ok(data_dir().cloned().unwrap_or_else(|| app.data_dir()))
 }
 
 /// Check if a marker file path contains the portable magic string.

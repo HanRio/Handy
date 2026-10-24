@@ -14,7 +14,7 @@ use std::fs::File;
 use std::io::{Read, Write};
 use std::path::Path;
 use std::time::{Duration, Instant};
-use tauri::Emitter;
+use crate::host::Emitter;
 
 /// Bound on connection setup for direct HTTP downloads (mirror + URL models).
 const HTTP_CONNECT_TIMEOUT: Duration = Duration::from_secs(15);

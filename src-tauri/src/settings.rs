@@ -5,8 +5,7 @@ use serde::{Deserialize, Deserializer, Serialize};
 use specta::Type;
 use std::collections::HashMap;
 use std::fmt;
-use tauri::AppHandle;
-use tauri_plugin_store::StoreExt;
+use crate::host::AppHandle;
 
 pub const APPLE_INTELLIGENCE_PROVIDER_ID: &str = "apple_intelligence";
 pub const APPLE_INTELLIGENCE_DEFAULT_MODEL_ID: &str = "Apple Intelligence";
@@ -66,17 +65,6 @@ impl<'de> Deserialize<'de> for LogLevel {
     }
 }
 
-impl From<LogLevel> for tauri_plugin_log::LogLevel {
-    fn from(level: LogLevel) -> Self {
-        match level {
-            LogLevel::Trace => tauri_plugin_log::LogLevel::Trace,
-            LogLevel::Debug => tauri_plugin_log::LogLevel::Debug,
-            LogLevel::Info => tauri_plugin_log::LogLevel::Info,
-            LogLevel::Warn => tauri_plugin_log::LogLevel::Warn,
-            LogLevel::Error => tauri_plugin_log::LogLevel::Error,
-        }
-    }
-}
 
 #[derive(Serialize, Deserialize, Debug, Clone, Type)]
 pub struct ShortcutBinding {
@@ -611,9 +599,7 @@ fn default_filler_word_removal_enabled() -> bool {
 }
 
 fn default_chinese_script() -> ChineseScript {
-    tauri_plugin_os::locale()
-        .and_then(|locale| crate::chinese_script::chinese_script_for_locale(&locale))
-        .unwrap_or_default()
+    ChineseScript::default()
 }
 
 fn default_debug_mode() -> bool {
@@ -665,9 +651,7 @@ fn default_post_process_enabled() -> bool {
 }
 
 fn default_app_language() -> String {
-    tauri_plugin_os::locale()
-        .map(|l| l.replace('_', "-"))
-        .unwrap_or_else(|| "en".to_string())
+    "en".to_string()
 }
 
 fn default_show_tray_icon() -> bool {
@@ -1064,51 +1048,7 @@ pub fn load_or_create_app_settings(app: &AppHandle) -> AppSettings {
 }
 
 pub fn get_settings(app: &AppHandle) -> AppSettings {
-    let store = app
-        .store(crate::portable::store_path(SETTINGS_STORE_PATH))
-        .expect("Failed to initialize store");
-
-    // Settings reads also persist one-time migrations. Migration helpers are
-    // idempotent, so this converges after the first read of an older store.
-    let mut settings = if let Some(settings_value) = store.get("settings") {
-        let (mut settings, mut updated) =
-            match serde_json::from_value::<AppSettings>(settings_value.clone()) {
-                Ok(settings) => (settings, false),
-                Err(e) => {
-                    warn!("Failed to parse stored settings ({e}); salvaging valid fields");
-                    (salvage_settings(&settings_value), true)
-                }
-            };
-
-        if apply_settings_migrations(&mut settings, &settings_value) {
-            updated = true;
-        }
-
-        // Merge in any bindings added since this store was written.
-        for (key, value) in get_default_settings().bindings {
-            if let std::collections::hash_map::Entry::Vacant(entry) = settings.bindings.entry(key) {
-                debug!("Adding missing binding: {}", entry.key());
-                entry.insert(value);
-                updated = true;
-            }
-        }
-
-        if updated {
-            store.set("settings", serde_json::to_value(&settings).unwrap());
-        }
-
-        settings
-    } else {
-        let default_settings = get_default_settings();
-        store.set("settings", serde_json::to_value(&default_settings).unwrap());
-        default_settings
-    };
-
-    if ensure_post_process_defaults(&mut settings) {
-        store.set("settings", serde_json::to_value(&settings).unwrap());
-    }
-
-    settings
+    app.settings()
 }
 
 /// Rebuilds settings from a store value that failed to deserialize as a whole.
@@ -1275,11 +1215,7 @@ pub fn update_checks_effectively_enabled(settings: &AppSettings) -> bool {
 }
 
 pub fn write_settings(app: &AppHandle, settings: AppSettings) {
-    let store = app
-        .store(crate::portable::store_path(SETTINGS_STORE_PATH))
-        .expect("Failed to initialize store");
-
-    store.set("settings", serde_json::to_value(&settings).unwrap());
+    app.set_settings(settings);
 }
 
 pub fn get_bindings(app: &AppHandle) -> HashMap<String, ShortcutBinding> {

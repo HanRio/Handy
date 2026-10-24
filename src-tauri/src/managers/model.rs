@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use tauri::{AppHandle, Emitter, Manager};
+use crate::host::{AppHandle, Emitter};
 
 mod download;
 
@@ -1118,10 +1118,9 @@ impl ModelManager {
         let bundled_models = ["ggml-small.bin"]; // Add other bundled models here if any
 
         for filename in &bundled_models {
-            let bundled_path = self.app_handle.path().resolve(
-                format!("resources/models/{}", filename),
-                tauri::path::BaseDirectory::Resource,
-            );
+            let bundled_path: Result<_, ()> = Ok(self
+                .app_handle
+                .resource_path(&format!("resources/models/{}", filename)));
 
             if let Ok(bundled_path) = bundled_path {
                 if bundled_path.exists() {

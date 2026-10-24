@@ -8,7 +8,6 @@ use crate::engine_supervisor::{
     CancelMark, DeviceInfo, DeviceSelector, EngineError, EngineSupervisor, LoadSpec, LoadedInfo,
     Unloading,
 };
-use crate::managers::audio::AudioRecordingManager;
 use crate::managers::model::ModelManager;
 use crate::settings::{
     get_settings, AppSettings, ChineseScript, ModelUnloadTimeout, TranscribeAcceleratorSetting,
@@ -25,8 +24,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{mpsc, Arc, Condvar, Mutex, MutexGuard};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime};
-use tauri::{AppHandle, Emitter, Manager};
-use tauri_specta::Event;
+use crate::host::{AppHandle, Emitter};
 use transcribe_cpp::{Backend, RunOptions, Task, Transcript};
 
 mod chunked;
@@ -56,7 +54,7 @@ pub struct ModelStateEvent {
 /// Live transcription snapshot emitted to the overlay during a streaming run.
 /// `committed` is the append-only, flicker-free prefix; `tentative` is the
 /// volatile suffix the model may still rewrite.
-#[derive(Clone, Debug, Serialize, Deserialize, Type, tauri_specta::Event)]
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
 pub struct StreamTextEvent {
     pub committed: String,
     pub tentative: String,
@@ -83,7 +81,7 @@ pub enum StreamWorkKind {
 }
 
 /// Emitted to switch the streaming overlay to a working spinner.
-#[derive(Clone, Debug, Serialize, Deserialize, Type, tauri_specta::Event)]
+#[derive(Clone, Debug, Serialize, Deserialize, Type)]
 pub struct StreamPhaseEvent {
     pub phase: StreamPhase,
     /// Present only when `phase` is `Working`.
@@ -306,16 +304,6 @@ impl TranscriptionManager {
                     // maybe_unload_immediately() after each transcription.
                     // Treating it as 0s here would unload the model mid-recording.
                     if timeout == ModelUnloadTimeout::Immediately {
-                        continue;
-                    }
-
-                    // While recording, keep the idle timer fresh so the
-                    // model is never unloaded mid-session.
-                    let is_recording = app_handle_cloned
-                        .try_state::<Arc<AudioRecordingManager>>()
-                        .is_some_and(|a| a.is_recording());
-                    if is_recording {
-                        manager_cloned.touch_activity();
                         continue;
                     }
 
@@ -876,11 +864,13 @@ impl TranscriptionManager {
 
     /// Emit a working-phase event to the streaming overlay (spinner + label).
     pub fn emit_stream_working(&self, kind: StreamWorkKind) {
-        let _ = StreamPhaseEvent {
-            phase: StreamPhase::Working,
-            kind: Some(kind),
-        }
-        .emit(&self.app_handle);
+        let _ = self.app_handle.emit(
+            "stream-phase",
+            StreamPhaseEvent {
+                phase: StreamPhase::Working,
+                kind: Some(kind),
+            },
+        );
     }
 
     /// Transcribe a whole clip in batch: a re-transcribed history entry, or
@@ -1219,11 +1209,13 @@ fn join_chunks(transcripts: Vec<Transcript>) -> (String, Option<String>) {
 }
 
 fn emit_stream_text(app_handle: &AppHandle, committed: &str, tentative: &str) {
-    let _ = StreamTextEvent {
-        committed: committed.to_string(),
-        tentative: tentative.to_string(),
-    }
-    .emit(app_handle);
+    let _ = app_handle.emit(
+        "stream-text",
+        StreamTextEvent {
+            committed: committed.to_string(),
+            tentative: tentative.to_string(),
+        },
+    );
 }
 
 fn lock_perf(perf: &Mutex<StreamPerf>) -> MutexGuard<'_, StreamPerf> {
