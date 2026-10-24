@@ -18,7 +18,7 @@ pub struct AppHandle(Arc<Inner>);
 impl AppHandle {
     pub fn new(data_dir: PathBuf, resource_dir: PathBuf) -> Self {
         let mut settings = get_default_settings();
-        settings.selected_model = "whisper-large-v3-turbo".to_string();
+        settings.selected_model = "handy-computer/whisper-large-v3-turbo-gguf/whisper-large-v3-turbo-Q8_0.gguf".to_string();
         settings.selected_language = "ko".to_string();
         Self(Arc::new(Inner {
             settings: RwLock::new(settings),

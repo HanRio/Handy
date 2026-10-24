@@ -14,7 +14,7 @@ use axum::{Json, Router};
 use serde::Serialize;
 use std::sync::Arc;
 
-pub const DEFAULT_MODEL_ID: &str = "whisper-large-v3-turbo";
+pub const DEFAULT_MODEL_ID: &str = "handy-computer/whisper-large-v3-turbo-gguf/whisper-large-v3-turbo-Q8_0.gguf";
 const MAX_UPLOAD_BYTES: usize = 2 * 1024 * 1024 * 1024;
 
 #[derive(Clone)]
